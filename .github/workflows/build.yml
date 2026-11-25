@@ -1,0 +1,60 @@
+name: Build Zara APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find project (unzip if needed)
+        id: locate
+        shell: bash
+        run: |
+          set -euo pipefail
+          find_settings() {
+            find . -type f \( -name 'settings.gradle.kts' -o -name 'settings.gradle' \) \
+              -not -path './.git/*' -not -path '*/build/*' | head -n 1
+          }
+          SETTINGS="$(find_settings || true)"
+          if [ -z "$SETTINGS" ]; then
+            Z="$(find . -type f -iname '*.zip' -not -path './.git/*' | head -n 1)"
+            if [ -n "$Z" ]; then
+              mkdir -p _extracted
+              unzip -q -o "$Z" -d _extracted
+            fi
+            SETTINGS="$(find_settings || true)"
+          fi
+          if [ -z "$SETTINGS" ]; then
+            echo "::error::No settings.gradle(.kts) found"
+            exit 1
+          fi
+          echo "root=$(dirname "$SETTINGS")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build debug APK
+        working-directory: ${{ steps.locate.outputs.root }}
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Zara-debug-apk
+          path: ${{ steps.locate.outputs.root }}/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
